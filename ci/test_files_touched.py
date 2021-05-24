@@ -38,7 +38,7 @@ test_suite = {
     # requirements.txt
     re.compile('requirements.txt'): ['tern report -i photon:3.0'],
     # Dockerfile
-    re.compile('Dockerfile'): [
+    re.compile('docker/Dockerfile'): [
         'python3 setup.py sdist && '
         'docker build -t ternd -f ci/Dockerfile . && '
         './docker_run.sh ternd "report -i golang:alpine"'],
@@ -67,14 +67,15 @@ test_suite = {
     re.compile('tern/classes/template.py'):
     ['python tests/test_class_template.py',
      'tern report -f spdxtagvalue -i photon:3.0',
-     'tern lock docker/Dockerfile'],
+     'tern lock samples/single_stage_tern/Dockerfile'],
     # tern/command_lib
-    re.compile('tern/command_lib'): [
+    re.compile('tern/analyze/default/command_lib'): [
         'tern report -i photon:3.0',
         'tern report -i debian:buster',
         'tern report -i alpine:3.9',
         'tern report -i archlinux:latest',
-        'tern report -i centos:7'],
+        'tern report -i centos:7',
+        'tern report -i node:12.16-alpine'],
     # tern/analyze/default/dockerfile
     re.compile('tern/analyze/default/dockerfile'): [
         'python tests/test_analyze_default_dockerfile_parse.py',
@@ -82,7 +83,7 @@ test_suite = {
         'tern report -i golang:alpine',
         'tern report -d samples/alpine_python/Dockerfile',
         'tern report -w photon.tar',
-        'tern lock docker/Dockerfile'],
+        'tern lock samples/single_stage_tern/Dockerfile'],
     # tern/load
     re.compile('tern/load'): [
         'python tests/test_load_docker_api.py'],

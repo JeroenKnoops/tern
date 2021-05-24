@@ -13,6 +13,7 @@ from tern.report import formats
 from tern.formats import generator
 from tern.report import content
 from tern.utils import constants
+from prettytable import PrettyTable
 
 
 # global logger
@@ -42,19 +43,26 @@ def print_full_report(image, print_inclusive):
            print_inclusive is False:
             continue
         if layer.import_image:
-            notes = notes + print_full_report(layer.import_image, print_inclusive)
+            notes = notes + print_full_report(
+                layer.import_image, print_inclusive)
         else:
-            notes = notes + get_layer_notices(layer)
-            (layer_pkg_list, layer_license_list,
-             file_level_licenses) = get_layer_info_list(layer)
-            # Collect files + packages + licenses in the layer
-            notes += formats.layer_file_licenses_list.format(
-                list=file_level_licenses)
-            notes += formats.layer_packages_list.format(
-                list=", ".join(layer_pkg_list) if layer_pkg_list else 'None')
-            notes += formats.layer_licenses_list.format(list=", ".join(
-                layer_license_list) if layer_license_list else 'None')
-            notes = notes + formats.package_demarkation
+            notes += print_layer_report(layer)
+            notes += formats.package_demarkation
+    return notes
+
+
+def print_layer_report(layer):
+    """Generate a report for a given layer"""
+    notes = get_layer_notices(layer)
+    filelicenses, pkgs_table = get_layer_info_list(layer)
+    notes += formats.layer_file_licenses_list.format(
+        list=filelicenses)
+    if pkgs_table:
+        notes += formats.layer_packages_header.format('\n')
+        for line in pkgs_table.splitlines():
+            notes += '\t' + line + '\n'
+    else:
+        notes += formats.layer_packages_header.format("None\n")
     return notes
 
 
@@ -89,30 +97,26 @@ def get_extension_headers(layers):
 
 def get_layer_info_list(layer):
     '''Given a layer, collect files + packages + licenses in the layer,
-    return them as lists.'''
-    layer_pkg_list = []
-    layer_license_list = []
+    return them as a PrettyTable string object.'''
     layer_file_licenses_list = []
     file_level_licenses = None
+    package_list = PrettyTable()
+    package_list.field_names = ["Package", "Version", "License"]
+    package_list.align = "l"
+    package_list.print_empty = False
 
     for f in layer.files:
-        layer_file_licenses_list.extend(f.license_expressions)
+        layer_file_licenses_list.extend(f.licenses)
 
     layer_file_licenses_list = list(set(layer_file_licenses_list))
     if layer_file_licenses_list:
         file_level_licenses = ", ".join(layer_file_licenses_list)
 
     for package in layer.packages:
-        pkg = package.name + "-" + package.version
-        if pkg not in layer_pkg_list and pkg:
-            layer_pkg_list.append(pkg)
+        package_list.add_row([package.name, package.version,
+                              package.pkg_license])
 
-        package_licenses = content.get_package_licenses(package)
-        for package_license in package_licenses:
-            if package_license not in layer_license_list:
-                layer_license_list.append(package_license)
-
-    return layer_pkg_list, layer_license_list, file_level_licenses
+    return file_level_licenses, package_list.get_string()
 
 
 def print_licenses_only(image_obj_list):
@@ -138,3 +142,10 @@ class Default(generator.Generate):
         if report_only:
             return report
         return report + print_licenses_only(image_obj_list)
+
+    def generate_layer(self, layer):
+        """Generate a default report for one layer object"""
+        report = formats.disclaimer.format(
+            version_info=content.get_tool_version())
+        logger.debug("Generating summary report for layer...")
+        return report + print_layer_report(layer)

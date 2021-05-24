@@ -14,6 +14,7 @@ from tern.utils import constants
 from tern.utils import rootfs
 from tern.classes.notice import Notice
 from tern.analyze import common
+from tern.report import formats
 from tern.analyze.default import default_common as dcom
 from tern.analyze.default import core
 from tern.analyze.default.dockerfile import lock
@@ -43,18 +44,26 @@ def fresh_analysis(image_obj, curr_layer, prereqs, options):
       what package managers were used.
     4 Use the prescribed methods for the package managers to retrieve
     """
+    # set up a notice origin for the current layer
+    origin_curr_layer = 'Layer {}'.format(
+        image_obj.layers[curr_layer].layer_index)
+    image_obj.layers[curr_layer].origins.add_notice_to_origins(
+        origin_curr_layer, Notice(formats.layer_created_by.format(
+            created_by=image_obj.layers[curr_layer].created_by), 'info'))
     # if there is no shell, try to see if it exists in the current layer
-    if not prereqs.shell:
+    if not prereqs.fs_shell:
         prereqs.shell = dcom.get_shell(image_obj.layers[curr_layer])
+    # mount diff layers from 0 till the current layer
+    target = mount_overlay_fs(image_obj, curr_layer, options.driver)
+    # set this layer's host path
+    prereqs.host_path = target
+    # mount dev, sys and proc after mounting diff layers
+    rootfs.prep_rootfs(target)
     # get commands that created the layer
     # for docker images this is retrieved from the image history
     command_list = dcom.get_commands_from_metadata(
         image_obj.layers[curr_layer])
     if command_list:
-        # mount diff layers from 0 till the current layer
-        target = mount_overlay_fs(image_obj, curr_layer, options.driver)
-        # mount dev, sys and proc after mounting diff layers
-        rootfs.prep_rootfs(target)
         # for each command look up the snippet library
         for command in command_list:
             pkg_listing = command_lib.get_package_listing(command.name)
@@ -66,13 +75,16 @@ def fresh_analysis(image_obj, curr_layer, prereqs, options):
                 prereqs.listing = pkg_listing
                 core.execute_snippets(
                     image_obj.layers[curr_layer], command, prereqs)
-        rootfs.undo_mount()
-        rootfs.unmount_rootfs()
+    else:
+        # fall back to executing what we know
+        core.execute_base(image_obj.layers[curr_layer], prereqs)
+    rootfs.undo_mount()
+    rootfs.unmount_rootfs()
 
 
-def analyze_subsequent_layers(image_obj, shell, master_list, options):
-    """Assuming that we have a shell and have completed analyzing the first
-    layer of the given image object, we now analyze the remaining layers.
+def analyze_subsequent_layers(image_obj, prereqs, master_list, options):
+    """Assuming we have completed analyzing the first layer of the given image
+    object, we now analyze the remaining layers.
     While we have layers:
         1. Check if the layer is empty. If it is, then we can't do anything and
         we should continue
@@ -81,12 +93,14 @@ def analyze_subsequent_layers(image_obj, shell, master_list, options):
         package information and bundle it into the image object
         3. Update the master list"""
     curr_layer = 1
-    # make a Prereqs object
-    prereqs = core.Prereqs()
-    prereqs.shell = shell
     # get list of environment variables
     prereqs.envs = lock.get_env_vars(image_obj)
     while curr_layer < len(image_obj.layers):
+        # If work_dir changes, update value accordingly
+        # so we can later execute base.yml commands from the work_dir
+        if image_obj.layers[curr_layer].get_layer_workdir():
+            prereqs.layer_workdir = \
+                image_obj.layers[curr_layer].get_layer_workdir()
         # make a notice for each layer
         origin_next_layer = 'Layer {}'.format(
             image_obj.layers[curr_layer].layer_index)

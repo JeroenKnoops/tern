@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2017-2020 VMware, Inc. All Rights Reserved.
+# Copyright (c) 2017-2021 VMware, Inc. All Rights Reserved.
 # SPDX-License-Identifier: BSD-2-Clause
 
 """
@@ -23,7 +23,6 @@ logger = logging.getLogger(constants.logger_name)
 directives = ['FROM',
               'ARG',
               'ADD',
-              'RUN',
               'ENV',
               'COPY',
               'ENTRYPOINT',
@@ -293,7 +292,7 @@ def find_git_info(line, dockerfile_path):
 def expand_add_command(dfobj):
     dockerfile_path = dfobj.filepath
     for i, command_dict in enumerate(dfobj.structure):
-        if command_dict['instruction'] == 'ADD':
+        if command_dict['instruction'] in ['ADD', 'COPY']:
             comment_line = find_git_info(command_dict['content'],
                                          dockerfile_path)
             dfobj.structure[i]['content'] = \

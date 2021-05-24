@@ -18,6 +18,7 @@ from tern.report import formats
 from tern.report import errors
 from tern.utils import constants
 from tern.utils import rootfs
+from tern.utils import host
 from tern.analyze import common as com
 from tern.analyze.default import default_common as dcom
 from tern.analyze.default import core
@@ -26,17 +27,14 @@ from tern.analyze.default import core
 logger = logging.getLogger(constants.logger_name)
 
 
-def get_os_release(base_layer):
-    '''Given the base layer object, determine if an os-release file exists and
-    return the PRETTY_NAME string from it. If no release file exists,
-    return an empty string. Assume that the layer filesystem is mounted'''
+def find_os_release(host_path):
+    """Find the OS PRETTY_NAME in the given path. If no os-release file
+    exists, return an empty string"""
     # os-release may exist under /etc/ or /usr/lib. We should first check
     # for the preferred /etc/os-release and fall back on /usr/lib/os-release
     # if it does not exist under /etc
-    etc_path = os.path.join(
-        rootfs.get_untar_dir(base_layer.tar_file), constants.etc_release_path)
-    lib_path = os.path.join(
-        rootfs.get_untar_dir(base_layer.tar_file), constants.lib_release_path)
+    etc_path = os.path.join(host_path, constants.etc_release_path)
+    lib_path = os.path.join(host_path, constants.lib_release_path)
     if not os.path.exists(etc_path):
         if not os.path.exists(lib_path):
             return ''
@@ -52,6 +50,12 @@ def get_os_release(base_layer):
             pretty_name = val
             break
     return pretty_name.strip('"')
+
+
+def get_os_release(base_layer):
+    """Assuming that the layer tarball is untarred are ready to be inspected,
+    get the OS information from the os-release file"""
+    return find_os_release(rootfs.get_untar_dir(base_layer.tar_file))
 
 
 def get_os_style(image_layer, binary):
@@ -101,16 +105,16 @@ def mount_first_layer(layer_obj):
 
 
 def analyze_first_layer(image_obj, master_list, options):
-    """Analyze the first layer of an image. Return the installed shell.
-    If there is no installed shell, return None
-    1. Check if the layer is empty. If it is then we can't find a shell
+    """Analyze the first layer of an image. Return a Prereqs object for the
+    next layer.
+    1. Check if the layer is empty. If it is not, return None
     2. See if we can load the layer from cache
     3. If we can't load from cache
     3.1 See if we can find any information about the rootfs
     3.2 If we are able to find any information, use any prescribed methods
         to extract package information
     4. Process and bundle that information into the image object
-    5. Return the shell for subsequent layer processing"""
+    5. Return a Prereqs object for subsequent layer processing"""
     # set up a notice origin for the first layer
     origin_first_layer = 'Layer {}'.format(image_obj.layers[0].layer_index)
     # check if the layer is empty
@@ -122,31 +126,41 @@ def analyze_first_layer(image_obj, master_list, options):
     # create a Prereqs object
     prereqs = core.Prereqs()
     # find the shell from the first layer
-    prereqs.shell = dcom.get_shell(image_obj.layers[0])
-    if not prereqs.shell:
+    prereqs.fs_shell = dcom.get_shell(image_obj.layers[0])
+    # find a shell for the host
+    prereqs.host_shell = host.check_shell()
+    if not prereqs.fs_shell and not prereqs.host_shell:
         logger.warning(errors.no_shell)
         image_obj.layers[0].origins.add_notice_to_origins(
             origin_first_layer, Notice(errors.no_shell, 'warning'))
     # find the binary from the first layer
     prereqs.binary = dcom.get_base_bin(image_obj.layers[0])
-    if not prereqs.binary:
-        logger.warning(errors.no_package_manager)
-        image_obj.layers[0].origins.add_notice_to_origins(
-            origin_first_layer, Notice(errors.no_package_manager, 'warning'))
     # try to load packages from cache
     if not com.load_from_cache(image_obj.layers[0], options.redo):
-        # set a possible OS
+        # add a notice if there is a "created by"
+        image_obj.layers[0].origins.add_notice_to_origins(
+            origin_first_layer, Notice(formats.layer_created_by.format(
+                created_by=image_obj.layers[0].created_by), 'info'))
+        # set a possible OS and package format
         get_os_style(image_obj.layers[0], prereqs.binary)
         # if there is a binary, extract packages
-        if prereqs.shell and prereqs.binary:
+        if prereqs.binary:
             # mount the first layer
-            mount_first_layer(image_obj.layers[0])
+            target_dir = mount_first_layer(image_obj.layers[0])
+            # set the host path to the mount point
+            prereqs.host_path = target_dir
             # core default execution on the first layer
             core.execute_base(image_obj.layers[0], prereqs)
             # unmount
             rootfs.undo_mount()
             rootfs.unmount_rootfs()
+        else:
+            logger.warning(errors.no_package_manager)
+            image_obj.layers[0].origins.add_notice_to_origins(
+                origin_first_layer, Notice(
+                    errors.no_package_manager, 'warning'))
+            return None
     # populate the master list with all packages found in the first layer
     for p in image_obj.layers[0].packages:
         master_list.append(p)
-    return prereqs.shell
+    return prereqs

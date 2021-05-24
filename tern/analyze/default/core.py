@@ -29,19 +29,18 @@ class Prereqs:
     """Set these values after instantiating an object, then pass it to the
     functions below"""
     def __init__(self):
-        self.shell = ''
-        self.binary = ''
-        self.envs = None
-        self.listing = None
+        self.fs_shell = ''  # container filesystem shell
+        self.host_shell = ''  # host shell
+        self.binary = ''  # container filesystem indicator file
+        self.layer_workdir = ''  # WORKDIR path
+        self.host_path = ''  # layer rootfs path on host
+        self.envs = None  # environment variables to set
+        self.listing = None  # current listing
 
 
 def execute_base(layer_obj, prereqs):
     """Given an ImageLayer object, find packages installed in the layer
-    using the default method. The prereqisites required for this to work:
-        prereqs.shell: the shell to use
-        prereqs.binary: the binary to look up in the command library
-        optional prerequisites:
-        prereqs.envs: any environment variables to set before execution
+    using the default method.
 
         1. Use command_lib's base to look up the binary to see if there
            is a method to retrieve the metadata
@@ -57,16 +56,14 @@ def execute_base(layer_obj, prereqs):
     # find the binary listing
     listing = command_lib.get_base_listing(prereqs.binary)
     if listing:
-        # put info notice about what is going to be invoked
-        snippet_msg = (formats.invoke_for_base + '\n' +
-                       content.print_base_invoke(prereqs.binary))
+        # put generic notice about how package metadata is collected
+        snippet_msg = formats.invoke_for_base.format(binary=prereqs.binary)
         layer_obj.origins.add_notice_to_origins(
             origin_layer, Notice(snippet_msg, 'info'))
         # get list of metadata by invoking scripts in chroot
         logger.debug("Collecting metadata for image layer...")
         pkg_dict, invoke_msg, warnings = collect.collect_list_metadata(
-            prereqs.shell, listing, layer_obj.get_layer_workdir(),
-            prereqs.envs)
+            listing, prereqs)
         # more processing for debian copyrights to get licenses
         if listing.get("pkg_format") == "deb":
             logger.debug("Processing Debian copyrights...")
@@ -80,8 +77,6 @@ def execute_base(layer_obj, prereqs):
                 origin_layer, Notice(invoke_msg, 'error'))
         if warnings:
             logger.warning("Some metadata may be missing")
-            layer_obj.origins.add_notice_to_origins(
-                origin_layer, Notice(warnings, 'warning'))
         # bundle the results into Package objects
         bundle.fill_pkg_results(layer_obj, pkg_dict)
         # remove extra FileData objects from the layer

@@ -79,31 +79,35 @@ dpkg:
       1:
         # Currently two types of environments are supported - host or container
         container:
-          - "dpkg --get-selections | cut -f1 -d':' | awk '{print $1}'"
+          - "dpkg-query -W -f '${Package}\n'"
     delimiter: "\n"
   # the length of this list should be the same as the names or else there will be a mismatch
   versions:
     invoke:
       1:
         container:
-          - "pkgs=`dpkg --get-selections | cut -f1 -d':' | awk '{print $1}'`"
-          - "for p in $pkgs; do dpkg -l $p | awk 'NR>5 {print $3}'; done"
+          - "dpkg-query -W -f '${Version}\n'"
     delimiter: "\n"
   copyrights:
     invoke:
       1:
         container:
-          - "pkgs=`dpkg --get-selections | cut -f1 -d':' | awk '{print $1}'`"
+          - "pkgs=`dpkg-query -W -f '${Package}\n'`"
           - "for p in $pkgs; do /bin/cat /usr/share/doc/$p/copyright; echo LICF; done"
     delimiter: 'LICF'
   files:
     invoke:
       1:
         container:
-        - "pkgs=`dpkg --get-selections | cut -f1 -d':' | awk '{print $1}'`"
+        - "pkgs=`dpkg-query -W -f '${Package}\n'`"
         - "for p in $pkgs; do files=`dpkg-query -L $p`; for file in $files; do if [ -f $file ]; then echo $file; fi; done; echo LICF; done"
     delimiter: "LICF"
-  proj_urls: {}
+  proj_urls:
+    invoke:
+      1:
+        container:
+          - "dpkg-query -W -f '${Homepage}\n' | /bin/sed 's/^$/Unknown/'"
+    delimiter: "\n"
 
 # apk ---------------------------------------------------------------------------------------------------------
 apk:
@@ -385,29 +389,49 @@ npm:
     invoke:
       1:
         container:
-          - "npm list -g | sed 's/\\(^[^a-z]*\\)\\([_.a-z0-9-]*\\)\\(@.*\\)/\\2/g' | grep -v '/usr*' | uniq"
+          - "npm list -g --json --long --depth=1000 > npm-global.json"
+      2:
+        host:
+          - "jq -r '.. | objects | select(has(\"name\") and has(\"version\")) | .name' npm-global.json"
     delimiter: "\n"
   versions:
     invoke:
       1:
         container:
-          - "pkgs=`npm list -g | sed 's/\\(^[^a-z]*\\)\\([_.a-z0-9-]*\\)\\(@.*\\)/\\2/g' | grep -v '/usr*' | uniq`"
-          - "for p in $pkgs; do npm show $p version; done"
+          - "npm list -g --json --long --depth=1000 > npm-global.json"
+      2:
+        host:
+          - "jq -r '.. | objects | select(has(\"name\") and has(\"version\")) | .version' npm-global.json"
     delimiter: "\n"
   licenses:
     invoke:
       1:
         container:
-          - "pkgs=`npm list -g | sed 's/\\(^[^a-z]*\\)\\([_.a-z0-9-]*\\)\\(@.*\\)/\\2/g' | grep -v '/usr*' | uniq`"
-          - "for p in $pkgs; do lic=`npm show $p license`; if [ -z \"$lic\" ]; then echo 'Unknown'; else echo $lic; fi; done"
+          - "npm list -g --json --long --depth=1000 > npm-global.json"
+      2:
+        host:
+          - "jq -r '.. | objects | select(has(\"name\") and has(\"version\")) | .license // \"Unknown\"' npm-global.json"
     delimiter: "\n"
   proj_urls:
     invoke:
       1:
         container:
-          - "pkgs=`npm list -g | sed 's/\\(^[^a-z]*\\)\\([_.a-z0-9-]*\\)\\(@.*\\)/\\2/g' | grep -v '/usr*' | uniq`"
-          - "for p in $pkgs; do npm view $p repository.url; done"
+          - "npm list -g --json --long --depth=1000 > npm-global.json"
+      2:
+        host:
+          - "jq -r '.. | objects | select(has(\"name\") and has(\"version\")) | .repository | if type == \"string\" then . else .url end | . // \"Unknown\"' npm-global.json"
     delimiter: "\n"
+  copyrights:
+    invoke:
+      1:
+        container:
+          - "npm list -g --json --long --depth=1000 > npm-global.json"
+      2:
+        host:
+          - "paths=`jq -r '.. | objects | select(has(\"name\") and has(\"version\")) | .path // \"Unknown\" | ltrimstr(\"/\")' npm-global.json`"
+          - "files=\"license license.md LICENSE LICENSE.md copying copying.md COPYING COPYING.md\""
+          - "for p in $paths; do for f in $files; do if [ -f $p/$f ]; then cat $p/$f; break; fi done; echo \"LICF\"; done"
+    delimiter: "LICF"
 # golang----------------------------------------------------------------------
 go:
   pkg_format: ''
@@ -440,3 +464,33 @@ go:
         container:
           - "go list -m all | tail -n +2 | cut -d ' ' -f 1"
     delimiter: "\n"
+# distroless------------------------------------------------------------------
+distroless:
+  pkg_format: 'deb'
+  os_guess:
+    - 'Distroless'
+  path:
+    - 'var/lib/dpkg/status.d/'
+  names:
+    invoke:
+      1:  
+        host:
+          - "files=`ls var/lib/dpkg/status.d`"
+          - "for f in $files; do grep -oP '^Package: \\K.*$' var/lib/dpkg/status.d/$f; done"
+    delimiter: "\n"
+  versions:
+    invoke:
+      1:  
+        host:
+          - "files=`ls var/lib/dpkg/status.d`"
+          - "for f in $files; do grep -oP '^Version: \\K.*$' var/lib/dpkg/status.d/$f; done"
+    delimiter: "\n"
+  copyrights:
+    invoke:
+      1:
+        host:
+          - "files=`ls var/lib/dpkg/status.d`"
+          - "pkgs=`for f in $files; do grep -oP '^Package: \\K.*$' var/lib/dpkg/status.d/$f; done`"
+          - "for p in $pkgs; do /bin/cat /usr/share/doc/$p/copyright; echo LICF; done"
+    delimiter: "LICF"
+  proj_urls: {}

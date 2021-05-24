@@ -26,9 +26,9 @@ def get_layer_files_licenses(layer):
     '''Given a image layer collect complete list of file licenses'''
     file_level_licenses = set()
     for f in layer.files:
-        for license_expression in f.license_expressions:
-            if license_expression:
-                file_level_licenses.add(license_expression)
+        for lic in f.licenses:
+            if lic:
+                file_level_licenses.add(lic)
     return list(file_level_licenses)
 
 
@@ -82,21 +82,13 @@ def print_invoke_list(info_dict, info):
                 report = report + formats.invoke_in_container
                 for snippet in info_dict[info]['invoke'][step]['container']:
                     report = report + '\t' + snippet + '\n'
+            elif 'host' in info_dict[info]['invoke'][step]:
+                report = report + formats.invoke_on_host
+                for snippet in info_dict[info]['invoke'][step]['host']:
+                    report = report + '\t' + snippet + '\n'
     else:
         for value in info_dict[info]:
             report = report + ' ' + value
-    report = report + '\n'
-    return report
-
-
-def print_base_invoke(key):
-    '''Given the key in the base library, return a string containing
-    the command_lib/base.yml'''
-    info = command_lib.get_base_listing(key)
-    report = ''
-    for item in command_lib.base_keys:
-        if item in info.keys():
-            report = report + print_invoke_list(info, item)
     report = report + '\n'
     return report
 

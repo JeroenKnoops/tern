@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (c) 2017-2020 VMware, Inc. All Rights Reserved.
+# Copyright (c) 2017-2021 VMware, Inc. All Rights Reserved.
 # SPDX-License-Identifier: BSD-2-Clause
 
 """
@@ -24,23 +24,28 @@ from tern.analyze.default import filter as fltr
 logger = logging.getLogger(constants.logger_name)
 
 
-def get_shell(layer):
-    '''Find the shell if any on the layer filesystem. Assume that the layer
-    has already been unpacked. If there is no shell, return an empty string'''
-    shell = ''
-    cwd = rootfs.get_untar_dir(layer.tar_file)
+def find_shell(fspath):
+    """Given the path to the filesystem where a shell may exist, find the
+    first available shell"""
     for sh in command_lib.command_lib['common']['shells']:
-        realpath = os.path.realpath(os.path.join(cwd, sh[1:]))
+        realpath = os.path.realpath(os.path.join(fspath, sh[1:]))
         # If realpath is a symlink and points to the root of the container,
         # check for existence of the linked binary in current working dir
-        if realpath[0] == '/' and os.path.exists(os.path.join(cwd,
+        if realpath[0] == '/' and os.path.exists(os.path.join(fspath,
                                                               realpath[1:])):
             return sh
         # otherwise, just follow symlink in same folder and
         # remove leading forwardslash before joining paths
-        if os.path.exists(os.path.join(cwd, sh[1:])):
+        if os.path.exists(os.path.join(fspath, sh[1:])):
             return sh
-    return shell
+    return ''
+
+
+def get_shell(layer):
+    '''Find the shell if any on the layer filesystem. Assume that the layer
+    has already been unpacked. If there is no shell, return an empty string'''
+    cwd = rootfs.get_untar_dir(layer.tar_file)
+    return find_shell(cwd)
 
 
 def get_base_bin(first_layer):
@@ -56,6 +61,16 @@ def get_base_bin(first_layer):
                 binary = key
                 break
     return binary
+
+
+def get_existing_bins(fspath):
+    """Return a list of all the binaries existing on the given filesystem"""
+    bin_list = []
+    for key, value in command_lib.command_lib['base'].items():
+        for path in value['path']:
+            if os.path.exists(os.path.join(fspath, path)):
+                bin_list.append(key)
+    return bin_list
 
 
 def fill_package_metadata(pkg_obj, pkg_listing, shell, work_dir, envs):
@@ -106,16 +121,22 @@ def get_commands_from_metadata(image_layer):
     origin_layer = 'Layer {}'.format(image_layer.layer_index)
     # check if there is a key containing the script that created the layer
     if image_layer.created_by:
-        command_line = fltr.get_run_command(image_layer.created_by)
-        if command_line:
+        cmd, instr = fltr.get_run_command(image_layer.created_by)
+        if image_layer.layer_index != 1 and instr in ['ADD', 'COPY']:
+            # add a notice saying we cannot analyze files
+            # imported from the host during container build
+            image_layer.origins.add_notice_to_origins(
+                origin_layer, Notice(errors.no_able_to_analyze, 'warning'))
+            return []
+        if cmd:
             command_list, msg = fltr.filter_install_commands(
-                general.clean_command(command_line))
+                general.clean_command(cmd))
             if msg:
                 image_layer.origins.add_notice_to_origins(
                     origin_layer, Notice(msg, 'warning'))
             return command_list
     image_layer.origins.add_notice_to_origins(
-        origin_layer, Notice(errors.no_layer_created_by, 'warning'))
+        origin_layer, Notice(errors.no_created_by, 'warning'))
     return []
 
 

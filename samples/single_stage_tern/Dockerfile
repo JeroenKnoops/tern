@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2020 VMware, Inc. All Rights Reserved.
+# Copyright (c) 2019-2021 VMware, Inc. All Rights Reserved.
 # SPDX-License-Identifier: BSD-2-Clause
 
 FROM debian:buster
@@ -29,11 +29,10 @@ RUN apt-get update && \
 # Adjust storage.conf to enable Fuse storage.
 RUN sed -i -e 's|^#mount_program|mount_program|g' -e '/additionalimage.*/a "/var/lib/shared",' /etc/containers/storage.conf
 
-# Install tern with latest changes
-COPY dist/tern-*.tar.gz .
+# Install tern
 RUN pip3 install --upgrade pip && \
     pip3 install --no-cache-dir \
-    tern-*.tar.gz
+    tern
 
 ENTRYPOINT ["tern", "--driver", "fuse"]
 CMD ["-h"]
